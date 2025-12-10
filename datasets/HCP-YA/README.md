@@ -58,3 +58,9 @@ bash scripts/make_hcpya_rest1lr_dataset.sh
 ```
 
 The dataset is saved in [`data/processed`](data/processed/) in multiple target output spaces (e.g. parcellated, flat map, MNI) in huggingface arrow format
+
+### 6. Upload processed datasets to r2
+
+```bash
+bash scripts/upload_hcpya_r2.sh
+```
