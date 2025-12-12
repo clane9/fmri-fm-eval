@@ -1,0 +1,57 @@
+import os
+
+from fmri_fm_eval.datasets.base import ArrowDataset
+from fmri_fm_eval.datasets.registry import register_dataset
+
+HCPYA_ROOT = os.getenv("HCPYA_ROOT", "s3://medarc/fmri-fm-eval/processed")
+
+HCPYA_TARGET_MAP_DICT = {
+    "age": "hcpya_target_map_Age.json",
+    "flanker": "hcpya_target_map_Flanker_Unadj.json",
+    "gender": "hcpya_target_map_Gender.json",
+    "neofacn": "hcpya_target_map_NEOFAC_N.json",
+    "pmat24": "hcpya_target_map_PMAT24_A_CR.json",
+}
+
+
+def _create_hcpya_rest1lr(space: str, target: str, **kwargs):
+    target_key = "sub"
+    target_map_path = HCPYA_TARGET_MAP_DICT[target]
+    target_map_path = f"{HCPYA_ROOT}/targets/{target_map_path}"
+
+    dataset_dict = {}
+    splits = ["train", "validation", "test"]
+    for split in splits:
+        url = f"{HCPYA_ROOT}/hcpya-rest1lr.{space}.arrow/{split}"
+        dataset_dict[split] = ArrowDataset(
+            url,
+            target_map_path=target_map_path,
+            target_key=target_key,
+            **kwargs,
+        )
+    return dataset_dict
+
+
+@register_dataset
+def hcpya_rest1lr_age(space: str, **kwargs):
+    return _create_hcpya_rest1lr(space, target="age")
+
+
+@register_dataset
+def hcpya_rest1lr_flanker(space: str, **kwargs):
+    return _create_hcpya_rest1lr(space, target="flanker")
+
+
+@register_dataset
+def hcpya_rest1lr_gender(space: str, **kwargs):
+    return _create_hcpya_rest1lr(space, target="gender")
+
+
+@register_dataset
+def hcpya_rest1lr_neofacn(space: str, **kwargs):
+    return _create_hcpya_rest1lr(space, target="neofacn")
+
+
+@register_dataset
+def hcpya_rest1lr_pmat24(space: str, **kwargs):
+    return _create_hcpya_rest1lr(space, target="pmat24")

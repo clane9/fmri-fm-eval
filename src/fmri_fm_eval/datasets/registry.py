@@ -27,10 +27,10 @@ def register_dataset(name_or_func: str | DatasetFn | None = None):
     return _decorator
 
 
-def create_dataset(name: str, **kwargs) -> DatasetDict:
+def create_dataset(name: str, space: str, **kwargs) -> DatasetDict:
     if name not in _DATASET_REGISTRY:
         raise ValueError(f"Dataset {name} not registered")
-    dataset_dict = _DATASET_REGISTRY[name](**kwargs)
+    dataset_dict = _DATASET_REGISTRY[name](space=space, **kwargs)
     return dataset_dict
 
 
@@ -47,5 +47,5 @@ def import_dataset_plugins():
             try:
                 plugins[name] = importlib.import_module(f"fmri_fm_eval.datasets.{name}")
             except Exception as exc:
-                _logger.warning(f"Import plugin {name} failed: {exc}", exc_info=True)
+                _logger.warning(f"Import dataset plugin {name} failed: {exc}", exc_info=True)
     return plugins

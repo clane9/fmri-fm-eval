@@ -27,9 +27,9 @@ class ArrowDataset(Dataset):
     def __init__(
         self,
         url: str,
-        transform: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
         target_map_path: str | Path | None = None,
         target_key: str | None = None,
+        transform: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
         keep_in_memory: bool = False,
         storage_options: dict[str, Any] | None = None,
     ):
