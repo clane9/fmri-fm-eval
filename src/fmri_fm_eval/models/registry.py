@@ -1,22 +1,32 @@
 import importlib
+import logging
 import pkgutil
-import warnings
 from typing import Callable
 
 
 import fmri_fm_eval.models
-from fmri_fm_eval.models.base import ModelTransform, ModelWrapper
+from fmri_fm_eval.models.base import ModelTransformPair, ModelFn, default_transform
+
+_logger = logging.getLogger(__package__)
+
+_MODEL_REGISTRY: dict[str, Callable[..., ModelTransformPair]] = {}
 
 
-_MODEL_REGISTRY: dict[str, Callable[..., ModelWrapper]] = {}
-_TRANSFORM_REGISTRY: dict[str, Callable[..., ModelTransform]] = {}
+def register_model(name_or_func: str | ModelFn | None = None):
+    """Register a model and optional tranform.
 
+    ```
+    @register_model
+    def new_model(**kwargs):
+        ...
+        return transform, model
+    ```
+    """
 
-def register_model(name_or_func: str | Callable | None = None):
     def _decorator(func: Callable):
         name = name_or_func if isinstance(name_or_func, str) else func.__name__
         if name in _MODEL_REGISTRY:
-            warnings.warn(f"Model {name} already registered.", RuntimeWarning)
+            _logger.warning(f"Model {name} already registered; overwriting.")
         _MODEL_REGISTRY[name] = func
         return func
 
@@ -25,47 +35,32 @@ def register_model(name_or_func: str | Callable | None = None):
     return _decorator
 
 
-def create_model(name: str, **kwargs) -> ModelWrapper:
+def create_model(name: str, **kwargs) -> ModelTransformPair:
     if name not in _MODEL_REGISTRY:
         raise ValueError(f"Model {name} not registered")
-    model = _MODEL_REGISTRY[name](**kwargs)
-    return model
+    model_pair = _MODEL_REGISTRY[name](**kwargs)
+
+    if not isinstance(model_pair, tuple):
+        model = model_pair
+        transform = default_transform
+    else:
+        transform, model = model_pair
+        transform = default_transform if transform is None else transform
+    return transform, model
 
 
 def list_models() -> list[str]:
     return list(_MODEL_REGISTRY)
 
 
-def register_transform(name_or_func: str | Callable | None = None):
-    def _decorator(func: Callable):
-        name = name_or_func if isinstance(name_or_func, str) else func.__name__
-        if name in _TRANSFORM_REGISTRY:
-            warnings.warn(f"Transform {name} already registered.", RuntimeWarning)
-        _TRANSFORM_REGISTRY[name] = func
-        return func
-
-    if isinstance(name_or_func, Callable):
-        return _decorator(name_or_func)
-    return _decorator
-
-
-def create_transform(name: str, **kwargs) -> ModelTransform:
-    if name not in _TRANSFORM_REGISTRY:
-        raise ValueError(f"Transform {name} not registered")
-    transform = _TRANSFORM_REGISTRY[name](**kwargs)
-    return transform
-
-
-def list_transforms() -> list[str]:
-    return list(_TRANSFORM_REGISTRY)
-
-
 def import_plugins():
+    """Finds and imports all plugins registering new models."""
     # https://packaging.python.org/en/latest/guides/creating-and-discovering-plugins/#using-namespace-packages
-    modules = {
-        name: importlib.import_module(name)
-        for finder, name, ispkg in pkgutil.iter_modules(
-            fmri_fm_eval.models.__path__, fmri_fm_eval.models.__name__ + "."
-        )
-    }
-    return modules
+    plugins = {}
+    for finder, name, ispkg in pkgutil.iter_modules(fmri_fm_eval.models.__path__):
+        if not (name in {"base", "registry", "template"} or name.startswith("test_")):
+            try:
+                plugins[name] = importlib.import_module(f"fmri_fm_eval.models.{name}")
+            except Exception as exc:
+                _logger.warning(f"Import plugin {name} failed: {exc}", exc_info=True)
+    return plugins

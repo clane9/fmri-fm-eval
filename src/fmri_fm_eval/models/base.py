@@ -1,4 +1,4 @@
-from typing import NamedTuple
+from typing import Callable, NamedTuple
 
 import torch.nn as nn
 from torch import Tensor
@@ -16,13 +16,26 @@ class ModelWrapper(nn.Module):
     Wrap an fMRI encoder model. Takes an input batch and returns a tuple of embeddings.
     """
 
+    __space__: str
+    """Expected input data space."""
+
     def forward(self, batch: dict[str, Tensor]) -> Embeddings: ...
 
 
-class ModelTransform(nn.Module):
+class ModelTransform:
     """
     Model specific data transform. Takes an input sample and returns a new sample
     with all model-specific transforms applied.
     """
 
-    def forward(self, sample: dict[str, Tensor]) -> dict[str, Tensor]: ...
+    def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor]: ...
+
+
+def default_transform(sample: dict[str, Tensor]) -> dict[str, Tensor]:
+    """Default No-op transform."""
+    return sample
+
+
+ModelTransformPair = tuple[ModelTransform, ModelWrapper]
+
+ModelFn = Callable[..., ModelWrapper | ModelTransformPair]
