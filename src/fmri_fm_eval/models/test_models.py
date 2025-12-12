@@ -4,11 +4,11 @@ import torch
 from torch import Tensor
 from torch.utils.data import default_collate
 
-from fmri_fm_eval.models.registry import list_models, create_model, import_plugins
+from fmri_fm_eval.models.registry import list_models, create_model, import_model_plugins
 import fmri_fm_eval.readers as readers
 
 # Import all available plugins to implicitly register models.
-import_plugins()
+import_model_plugins()
 
 
 def get_dummy_sample(space: str, n_samples: int) -> dict[str, Tensor]:

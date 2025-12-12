@@ -3,7 +3,6 @@ import logging
 import pkgutil
 from typing import Callable
 
-
 import fmri_fm_eval.models
 from fmri_fm_eval.models.base import ModelTransformPair, ModelFn, default_transform
 
@@ -53,7 +52,7 @@ def list_models() -> list[str]:
     return list(_MODEL_REGISTRY)
 
 
-def import_plugins():
+def import_model_plugins():
     """Finds and imports all plugins registering new models."""
     # https://packaging.python.org/en/latest/guides/creating-and-discovering-plugins/#using-namespace-packages
     plugins = {}
