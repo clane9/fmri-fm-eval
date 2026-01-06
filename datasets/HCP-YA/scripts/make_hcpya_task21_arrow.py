@@ -151,8 +151,8 @@ def main(args):
             "mag": hfds.Value("string"),
             "dir": hfds.Value("string"),
             "path": hfds.Value("string"),
-            "start": hfds.Value("float32"),  # clip start and end in secs
-            "end": hfds.Value("float32"),
+            "start": hfds.Value("int32"),
+            "end": hfds.Value("int32"),
             "tr": hfds.Value("float32"),
             "cond": hfds.Value("string"),
             "cond_id": hfds.Value("int32"),
@@ -221,8 +221,8 @@ def generate_samples(
             sample = {
                 **meta,
                 "path": str(path),
-                "start": start * tr,
-                "end": end * tr,
+                "start": start,
+                "end": end,
                 "tr": tr,
                 "cond": cond,
                 "cond_id": cond_id,
