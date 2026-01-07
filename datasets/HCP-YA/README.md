@@ -2,9 +2,7 @@
 
 Homepage: https://www.humanconnectome.org/study/hcp-young-adult/overview
 
-## Dataset creation
-
-### Download preprocessed fMRI data
+## 1. Download source data
 
 Download minimally preprocessed outputs in MNI152 NLin6Asym (FSL) space and fsLR 91k CIFTI space. Note downloading HCP data form S3 requires signed access.
 
@@ -18,13 +16,13 @@ aws s3 sync s3://hcp-openaccess/HCP_1200 data/sourcedata/HCP_1200 \
 
 > *Note*: alternatively, the data can be streamed directly from s3 instead of downloading locally.
 
-### Download phenotypic data
-
 Download the unrestricted and restricted phenotypic data from [BALSA](https://balsa.wustl.edu/) and copy to [`metadata/hcpya_unrestricted.csv`](metadata/hcpya_unrestricted.csv) and [`metadata/hcpya_restricted.csv`](metadata/hcpya_restricted.csv) respectively.
 
 We only use the restricted sheet for generating subject splits. Specifically, we use the family ID for generating splits of unrelated subjects. Phenotypic prediction targets are constructed from unrestricted data.
 
-### Create subject splits
+## 2. Generate static metadata
+
+### Subject splits
 
 Define 20 random subject splits ("batches") of independent unrelated subjects.
 
@@ -36,13 +34,13 @@ The splits are saved in [`metadata/hcpya_subject_batch_splits.json`](metadata/hc
 
 The standard subject splits are:
 
-- train: batches `[0, 1, ..., 16]`
+- train: batches `[0, 1, ..., 16]` (or a subset thereof for smaller training data)
 - validation: batches `[17, 18]`
 - test: batches `[19, 20]`
 
-> *Note:* in a previous version of the dataset, the first 18 batches (train + validation) were used for pretraining.
+> *Note:* for pretraining, usually the first 18 batches (train + validation) are used.
 
-### Generate metadata table
+### Image metadata
 
 Generate a table including all HCP-YA image metadata. This will make generating derived datasets easier.
 
@@ -52,7 +50,7 @@ uv run python scripts/make_hcpya_metadata.py
 
 The output metadata is saved in [`metadata/hcpya_metadata.parquet`](metadata/hcpya_metadata.parquet).
 
-### Generate phenotypic prediction targets
+### Phenotypic prediction targets
 
 Generate discrete coded phenotypic target variables.
 
@@ -60,11 +58,11 @@ Generate discrete coded phenotypic target variables.
 uv run python scripts/make_hcpya_targets.py
 ```
 
-The targets are saved in [`metadata/targets`](metadata/targets/) as JSON files mapping subject ID to target variable.
+The targets are saved in [`metadata/hcp_pheno_targets.csv`](metadata/hcp_pheno_targets.csv).
 
-### Generate pretraining webdataset
+## 3. Generate full webdataset datasets for pretraining
 
-We reserve ~80% of the full HCP-YA dataset for pretraining fMRI foundation models. Generate the fixed pretraining data in [webdataset](https://github.com/webdataset/webdataset) format for all target spaces.
+We render *all* HCP-YA data into [webdataset](https://github.com/webdataset/webdataset) shards to use for pretraining.
 
 ```bash
 bash scripts/make_hcpya_all_wds.sh
@@ -72,32 +70,50 @@ bash scripts/make_hcpya_all_wds.sh
 
 The script uploads shards automatically to the MedARC S3 bucket (provided your env variables are set up correctly).
 
-### Generate `miniclips` eval dataset
-
-To evaluate model reconstruction performance, we generate a small eval dataset of ~2K short fMRI clips sampled uniformly from 100 subjects in each of the train, validation, and test HCP-YA splits.
-
 ```bash
-bash scripts/make_hcpya_miniclips_arrow.sh
+# HCP authorized AWS key
+AWS_ACCESS_KEY_ID=XXXX
+AWS_SECRET_ACCESS_KEY=XXXX
+AWS_ENDPOINT_URL_S3=
+
+# MedARC R2 key
+R2_ACCESS_KEY_ID=XXXX
+R2_SECRET_ACCESS_KEY=XXXX
+R2_ENDPOINT_URL_S3="https://XXXX.r2.cloudflarestorage.com"
 ```
 
-The dataset is saved in [`data/processed`](data/processed/) in multiple target output spaces (e.g. parcellated, flat map, MNI) in huggingface arrow format.
+## 4. Generate eval datasets
 
-### Generate `taskclips` eval dataset
+All eval datasets are saved in [`data/processed`](data/processed/) in multiple target output spaces (e.g. `schaefer400`, `flat`, `mni`) in huggingface arrow format. All datasets use the same batches of subjects for splits:
 
-> **_TODO_**
+- `train`: `{0..7}` (~400 subjects)
+- `validation`: `{16..17}` (~100 subjects)
+- `test`: `{18..19}` (~100 subjects)
 
-### Generate `rest1lr` eval dataset
+Though the exact number of subjects per split varies across datasets due to differences in data curation.
 
-To evaluate phenotypic prediction perofmrnace, we generate an eval dataset consisting of single resting state runs (`REST1_LR`) truncated to 500 TRs per run from ~600 subjects.
+### `clips` eval dataset
 
-| split | subjects | frames |
-| --- | --- | --- |
-| train | 440 | 220K |
-| validation | 98 | 49K |
-| test | 115 | 58K |
+To evaluate model reconstruction performance, we generate an eval dataset of short fMRI clips sampled uniformly from all fMRI runs.
 
 ```bash
-bash scripts/make_hcpya_rest1lr_arrow.sh
+uv run python scripts/make_hcpya_clips_arrow.py --space schaefer400
+```
+
+### `task21` eval dataset
+
+To evaluate cognitive state prediction, we generate an eval dataset of trial-locked fMRI clips sampling from 6 fMRI tasks and 21 task conditions.
+
+```bash
+uv run python scripts/make_hcpya_task21_arrow.py --space schaefer400
+```
+
+### `rest1lr` eval dataset
+
+To evaluate phenotypic prediction performance, we generate an eval dataset consisting of single resting state runs (`REST1_LR`) truncated to 500 TRs per run.
+
+```bash
+uv run python scripts/make_hcpya_rest1lr_arrow.py --space schaefer400
 ```
 
 ### Upload processed datasets to r2
@@ -105,5 +121,11 @@ bash scripts/make_hcpya_rest1lr_arrow.sh
 Sync any locally saved datasets to our remote MedARC R2 bucket.
 
 ```bash
-bash scripts/upload_hcpya_r2.sh
+# args="--dryrun"
+args=
+
+for ds_dir in data/processed/*; do
+    ds_name=${ds_dir##*/}
+    aws s3 sync $args $ds_dir s3://medarc/fmri-fm-eval/processed/${ds_name}
+done
 ```
