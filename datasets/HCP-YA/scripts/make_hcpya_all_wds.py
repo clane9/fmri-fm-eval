@@ -29,10 +29,10 @@ ROOT = Path(__file__).parents[1]
 HCP_ROOT = ROOT / "data/sourcedata/HCP_1200"
 META_PATH = ROOT / "metadata/hcpya_metadata.parquet"
 
-# Subject batches for each split.
-SUB_BATCH_SPLITS = {
-    "train": list(range(16)),
-}
+# Subject batches to generate
+# Generate all 20 batches, but we should be careful about which ranges of shards to
+# pretrain on.
+SUB_BATCHES = list(range(20))
 
 # We use a fixed number of shards per subject batch for convenient dataset subsampling.
 # We use a consistent number of shards per batch across data formats so that sampling
@@ -54,7 +54,7 @@ SEED = 2146
 
 def main(args):
     # check shard id
-    batch_ids = SUB_BATCH_SPLITS[args.split]
+    batch_ids = SUB_BATCHES
     shards_per_batch = SHARDS_PER_BATCH
     num_shards = shards_per_batch * len(batch_ids)
     if not (0 <= args.shard_id < num_shards):
@@ -62,8 +62,8 @@ def main(args):
         return 1
 
     outdir = AnyPath(args.outdir or ROOT / "data/processed")
-    outdir = outdir / f"hcpya-all.{args.space}.wds/{args.split}"
-    outpath = outdir / f"hcpya-all-{args.space}-{args.split}_{args.shard_id:05d}.tar"
+    outdir = outdir / f"hcpya-all.{args.space}.wds"
+    outpath = outdir / f"hcpya-all-{args.space}_{args.shard_id:05d}.tar"
     _logger.info(
         "Generating dataset: %s (%04d/%d)",
         outdir.relative_to(outdir.parents[1]),
@@ -93,7 +93,7 @@ def main(args):
     batch_series_paths = sorted(meta_df.loc[sub_mask, "path"].values)
 
     # volume space for a424 and mni, otherwise cifti space
-    if args.space in {"a424", "mni"}:
+    if args.space in {"a424", "mni", "mni_cortex"}:
         batch_series_paths = [
             p.replace("_Atlas_MSMAll.dtseries.nii", ".nii.gz") for p in batch_series_paths
         ]
@@ -220,7 +220,6 @@ if __name__ == "__main__":
     parser.add_argument("--root", type=str, default=None)
     parser.add_argument("--outdir", type=str, default=None)
     parser.add_argument("--space", type=str, default="flat", choices=list(readers.READER_DICT))
-    parser.add_argument("--split", type=str, default="train", choices=list(SUB_BATCH_SPLITS))
     parser.add_argument("--shard-id", type=int, default=0)
     args = parser.parse_args()
     sys.exit(main(args))

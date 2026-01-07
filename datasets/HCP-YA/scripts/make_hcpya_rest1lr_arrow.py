@@ -14,12 +14,17 @@ from cloudpathlib import AnyPath, CloudPath
 import fmri_fm_eval.nisc as nisc
 import fmri_fm_eval.readers as readers
 
+# use smaller writer batch size to avoid OverflowError on very large mni data
+# https://github.com/huggingface/datasets/issues/6422
+hfds.config.DEFAULT_MAX_BATCH_SIZE = 256
+
 logging.basicConfig(
     format="[%(levelname)s %(asctime)s]: %(message)s",
     level=logging.INFO,
     datefmt="%y-%m-%d %H:%M:%S",
 )
 logging.getLogger("nibabel").setLevel(logging.ERROR)
+logging.getLogger("botocore").setLevel(logging.ERROR)  # quiet aws credential log msg
 
 _logger = logging.getLogger(__name__)
 
@@ -28,6 +33,7 @@ HCP_ROOT = ROOT / "data/sourcedata/HCP_1200"
 META_PATH = ROOT / "metadata/hcpya_metadata.parquet"
 TARGET_PATH = ROOT / "metadata/hcpya_pheno_targets.csv"
 
+# ~600 subs total, 4:1:1 ratio
 SUB_BATCH_SPLITS = {
     "train": [0, 1, 2, 3, 4, 5, 6, 7],
     "validation": [16, 17],
@@ -162,6 +168,8 @@ def main(args):
                 num_proc=args.num_proc,
                 split=hfds.NamedSplit(split),
                 cache_dir=tmpdir,
+                # otherwise fingerprint crashes on mni space, ig bc of hashing the reader
+                fingerprint=f"hcpya-rest1lr-{args.space}-{split}",
             )
         dataset = hfds.DatasetDict(dataset_dict)
 

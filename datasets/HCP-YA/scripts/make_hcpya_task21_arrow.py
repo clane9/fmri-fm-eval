@@ -104,7 +104,7 @@ def main(args):
         sub_mask = (
             meta_df["sub"].isin(split_subjects)
             & meta_df["task"].isin(HCP_TASK21_TASKS)
-            & (meta_df["mag"] == "3T")  # tbf, these tasks are all in 3T, but just to be explicit
+            & (meta_df["mag"] == "3T")  # tbf, these are all in 3T, but just to be explicit
             & (meta_df["dir"] == "LR")  # restrict to LR phase direction only
         )
 
@@ -112,8 +112,8 @@ def main(args):
 
         # only keep subjects with complete task data
         counts = sub_df.groupby("sub").agg({"task": "nunique"})
-        include_subs = counts.index.values[counts["task"] == len(HCP_TASK21_TASKS)]
-        sub_df = sub_df.loc[sub_df["sub"].isin(include_subs)]
+        split_subjects = counts.index.values[counts["task"] == len(HCP_TASK21_TASKS)]
+        sub_df = sub_df.loc[sub_df["sub"].isin(split_subjects)]
 
         for path, events in zip(sub_df["path"], sub_df["events"]):
             # "100307/MNINonLinear/Results/tfMRI_EMOTION_LR"
@@ -137,6 +137,7 @@ def main(args):
     reader = readers.READER_DICT[args.space]()
     dim = readers.DATA_DIMS[args.space]
 
+    # root can be local or remote.
     root = AnyPath(args.root or HCP_ROOT)
 
     # the bold data are scaled to mean 0, stdev 1 and then truncated to float16 to save
@@ -146,16 +147,14 @@ def main(args):
     features = hfds.Features(
         {
             "sub": hfds.Value("string"),
-            "mod": hfds.Value("string"),
             "task": hfds.Value("string"),
-            "mag": hfds.Value("string"),
-            "dir": hfds.Value("string"),
+            "cond": hfds.Value("string"),
+            "cond_id": hfds.Value("int32"),
             "path": hfds.Value("string"),
             "start": hfds.Value("int32"),
             "end": hfds.Value("int32"),
+            "n_frames": hfds.Value("int32"),
             "tr": hfds.Value("float32"),
-            "cond": hfds.Value("string"),
-            "cond_id": hfds.Value("int32"),
             "bold": hfds.Array2D(shape=(None, dim), dtype="float16"),
             "mean": hfds.Array2D(shape=(1, dim), dtype="float32"),
             "std": hfds.Array2D(shape=(1, dim), dtype="float32"),
@@ -179,7 +178,7 @@ def main(args):
                 split=hfds.NamedSplit(split),
                 cache_dir=tmpdir,
                 # otherwise fingerprint crashes on mni space, ig bc of hashing the reader
-                fingerprint=f"hcpya-miniclips-{args.space}-{split}",
+                fingerprint=f"hcpya-task21-{args.space}-{split}",
             )
         dataset = hfds.DatasetDict(dataset_dict)
 
@@ -196,6 +195,7 @@ def generate_samples(
 ):
     for path, fullpath in prefetch(root, paths):
         meta = parse_hcp_metadata(fullpath)
+        assert meta["mag"] == "3T"
         tr = HCP_TR[meta["mag"]]
 
         series = reader(fullpath)
@@ -219,13 +219,15 @@ def generate_samples(
             clip = series[start:end]
 
             sample = {
-                **meta,
+                "sub": meta["sub"],
+                "task": meta["task"],
+                "cond": cond,
+                "cond_id": cond_id,
                 "path": str(path),
                 "start": start,
                 "end": end,
+                "n_frames": len(clip),
                 "tr": tr,
-                "cond": cond,
-                "cond_id": cond_id,
                 "bold": clip.astype(np.float16),
                 "mean": mean.astype(np.float32),
                 "std": std.astype(np.float32),

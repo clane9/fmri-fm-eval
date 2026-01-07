@@ -14,6 +14,10 @@ from cloudpathlib import AnyPath, CloudPath
 import fmri_fm_eval.nisc as nisc
 import fmri_fm_eval.readers as readers
 
+# use smaller writer batch size to avoid OverflowError on very large mni data
+# https://github.com/huggingface/datasets/issues/6422
+hfds.config.DEFAULT_MAX_BATCH_SIZE = 256
+
 logging.basicConfig(
     format="[%(levelname)s %(asctime)s]: %(message)s",
     level=logging.INFO,
@@ -28,9 +32,9 @@ ROOT = Path(__file__).parents[1]
 HCP_ROOT = ROOT / "data/sourcedata/HCP_1200"
 META_PATH = ROOT / "metadata/hcpya_metadata.parquet"
 
-# ~300 subs total, 1:1:1 ratio
+# ~600 subs total, 4:1:1 ratio
 SUB_BATCH_SPLITS = {
-    "train": [0, 1],
+    "train": [0, 1, 2, 3, 4, 5, 6, 7],
     "validation": [16, 17],
     "test": [18, 19],
 }
@@ -41,20 +45,20 @@ NUM_FRAMES = 16
 # clip sampling stride
 STRIDE = 64
 
-# https://www.humanconnectome.org/hcp-protocols-ya-3t-imaging
-# https://www.humanconnectome.org/hcp-protocols-ya-7t-imaging
-HCP_TR = {"3T": 0.72, "7T": 1.0}
-
 # Resample all time series to 1s tr.
 TARGET_TR = 1.0
 INTERPOLATION = "pchip"
+
+# https://www.humanconnectome.org/hcp-protocols-ya-3t-imaging
+# https://www.humanconnectome.org/hcp-protocols-ya-7t-imaging
+HCP_TR = {"3T": 0.72, "7T": 1.0}
 
 # Fixed seed for sampling runs.
 SEED = 8581
 
 
 def main(args):
-    outdir = ROOT / f"data/processed/hcpya-miniclips.{args.space}.arrow"
+    outdir = ROOT / f"data/processed/hcpya-clips.{args.space}.arrow"
     _logger.info("Generating dataset: %s", outdir)
     if outdir.exists():
         _logger.warning("Output %s exists; exiting.", outdir)
@@ -79,10 +83,13 @@ def main(args):
         split_paths = sorted(meta_df.loc[sub_mask, "path"].values)
 
         num_runs = len(batch_ids) * NUM_RUNS_PER_BATCH
-        split_paths = rng.choice(split_paths, num_runs, replace=False)
-        path_splits[split] = split_paths.tolist()
+        split_paths = rng.choice(split_paths, num_runs, replace=False).tolist()
+        path_splits[split] = split_paths
+        _logger.info(f"Split ({split}): N={len(split_paths)}\n{split_paths[:5]}")
 
     # volume space for a424 and mni, otherwise cifti space
+    # TODO: hacky, the reader should know what input space it needs. we shouldn't need
+    # to remember this in every script.
     if args.space in {"a424", "mni", "mni_cortex"}:
         for split, split_paths in path_splits.items():
             path_splits[split] = [
@@ -94,6 +101,7 @@ def main(args):
     reader = readers.READER_DICT[args.space]()
     dim = readers.DATA_DIMS[args.space]
 
+    # root can be local or remote.
     root = AnyPath(args.root or HCP_ROOT)
 
     # the bold data are scaled to mean 0, stdev 1 and then truncated to float16 to save
@@ -108,6 +116,7 @@ def main(args):
             "path": hfds.Value("string"),
             "start": hfds.Value("int32"),
             "end": hfds.Value("int32"),
+            "n_frames": hfds.Value("int32"),
             "tr": hfds.Value("float32"),
             "bold": hfds.Array2D(shape=(None, dim), dtype="float16"),
             "mean": hfds.Array2D(shape=(1, dim), dtype="float32"),
@@ -122,12 +131,12 @@ def main(args):
             dataset_dict[split] = hfds.Dataset.from_generator(
                 generate_samples,
                 features=features,
-                gen_kwargs={"paths": paths, "root": root, "reader": reader, "dim": dim},
+                gen_kwargs={"paths": paths, "root": root, "reader": reader},
                 num_proc=args.num_proc,
                 split=hfds.NamedSplit(split),
                 cache_dir=tmpdir,
                 # otherwise fingerprint crashes on mni space, ig bc of hashing the reader
-                fingerprint=f"hcpya-miniclips-{args.space}-{split}",
+                fingerprint=f"hcpya-clips-{args.space}-{split}",
             )
         dataset = hfds.DatasetDict(dataset_dict)
 
@@ -135,7 +144,7 @@ def main(args):
         dataset.save_to_disk(outdir, max_shard_size="300MB")
 
 
-def generate_samples(paths: list[str], *, root: AnyPath, reader: readers.Reader, dim: int):
+def generate_samples(paths: list[str], *, root: AnyPath, reader: readers.Reader):
     for path, fullpath in prefetch(root, paths):
         meta = parse_hcp_metadata(fullpath)
         tr = HCP_TR[meta["mag"]]
@@ -148,16 +157,17 @@ def generate_samples(paths: list[str], *, root: AnyPath, reader: readers.Reader,
 
         for start in range(0, len(series) - STRIDE + 1, STRIDE):
             end = start + NUM_FRAMES
-            bold = series[start:end]
-            assert len(bold) == NUM_FRAMES
+            clip = series[start:end]
+            assert len(clip) == NUM_FRAMES
 
             sample = {
                 **meta,
                 "path": str(path),
                 "start": start,
                 "end": end,
+                "n_frames": len(clip),
                 "tr": tr,
-                "bold": bold.astype(np.float16),
+                "bold": clip.astype(np.float16),
                 "mean": mean.astype(np.float32),
                 "std": std.astype(np.float32),
             }
@@ -203,7 +213,9 @@ def parse_hcp_metadata(path: Path) -> dict[str, str]:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=str, default=None)
-    parser.add_argument("--space", type=str, default="fslr64k", choices=list(readers.READER_DICT))
+    parser.add_argument(
+        "--space", type=str, default="schaefer400", choices=list(readers.READER_DICT)
+    )
     parser.add_argument("--num_proc", "-j", type=int, default=32)
     args = parser.parse_args()
     sys.exit(main(args))
