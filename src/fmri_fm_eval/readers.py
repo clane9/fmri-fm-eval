@@ -14,7 +14,10 @@ class Reader(Protocol):
 
 def fslr64k_reader() -> Reader:
     def fn(path: str):
-        series = nisc.read_cifti_surf_data(path)
+        if str(path).endswith(".gii"):
+            series = nisc.read_gifti_surf_data(path)
+        else:
+            series = nisc.read_cifti_surf_data(path)
         return series
 
     return fn
@@ -32,7 +35,10 @@ def schaefer400_reader() -> Reader:
     parcavg = nisc.parcel_average_schaefer_fslr64k(400)
 
     def fn(path: str):
-        series = nisc.read_cifti_surf_data(path)
+        if str(path).endswith(".gii"):
+            series = nisc.read_gifti_surf_data(path)
+        else:
+            series = nisc.read_cifti_surf_data(path)
         series = parcavg(series)
         return series
 
@@ -65,7 +71,10 @@ def flat_reader() -> Reader:
     resampler = nisc.flat_resampler_fslr64k_224_560()
 
     def fn(path: str):
-        series = nisc.read_cifti_surf_data(path)
+        if str(path).endswith(".gii"):
+            series = nisc.read_gifti_surf_data(path)
+        else:
+            series = nisc.read_cifti_surf_data(path)
         series = resampler.transform(series, interpolation="linear")
         series = series[:, resampler.mask_]
         return series
@@ -117,7 +126,12 @@ MNI152_2MM_AFFINE = (
 def _ensure_mni152_2mm(img: nib.Nifti1Image, interpolation: str = "linear"):
     if img.shape[:3] != MNI152_2MM_SHAPE:
         img = resample_img(
-            img, MNI152_2MM_AFFINE, MNI152_2MM_SHAPE, interpolation=interpolation, copy_header=True
+            img,
+            target_affine=np.array(MNI152_2MM_AFFINE),
+            target_shape=MNI152_2MM_SHAPE,
+            interpolation=interpolation,
+            force_resample=True,
+            copy_header=True,
         )
     return img
 
