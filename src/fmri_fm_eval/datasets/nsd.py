@@ -15,7 +15,7 @@ def nsd_cococlip(space: str, **kwargs):
     for split in splits:
         url = f"{NSD_ROOT}/nsd-cococlip.{space}.arrow/{split}"
         dataset = hfds.load_dataset("arrow", data_files=f"{url}/*.arrow", split="train", **kwargs)
-        dataset = HFDataset(dataset, target_key="coco_id")
+        dataset = HFDataset(dataset, target_key="category_id")
         dataset_dict[split] = dataset
 
     return dataset_dict

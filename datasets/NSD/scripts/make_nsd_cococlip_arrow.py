@@ -38,6 +38,7 @@ NUM_FRAMES = 16
 # split of subjects and sessions
 # we hold out two subjects for validation and test
 # we also include an in-distribution test set "testid"
+# nb, sessions are 1-indexed in the metadata (from NSD filenames)
 SUB_SES_SPLITS = {
     "train": [
         ("subj01", (0, 35)),
@@ -81,13 +82,16 @@ def main(args):
     for split in SUB_SES_SPLITS:
         run_splits[split] = []
         for sub, (start, end) in SUB_SES_SPLITS[split]:
-            for ses in range(start, end):
+            for ses_id in range(start, end):
+                ses = ses_id + 1  # nsd sessions are 1-indexed
                 ses_df = trial_df.query(f"sub == '{sub}' and ses == {ses}")
                 for run in ses_df["run"].unique().tolist():
                     run_splits[split].append((sub, ses, run))
         _logger.info(f"{split}: num runs = {len(run_splits[split])}")
 
     logits = np.load(ROOT / "data/nsd_clip_coco_logits.npy")
+    # nb, targets are shape (n, 80) (excluding background category 0)
+    # so if you're used to classic coco category ids these will be off by 1
     targets = np.argmax(logits, axis=1)
 
     # load the data reader for the target space and look up the data dimension.
@@ -106,7 +110,7 @@ def main(args):
             "run": hfds.Value("int32"),
             "trial_id": hfds.Value("int32"),
             "nsd_id": hfds.Value("int32"),
-            "coco_id": hfds.Value("int32"),
+            "category_id": hfds.Value("int32"),
             "path": hfds.Value("string"),
             "start": hfds.Value("int32"),
             "end": hfds.Value("int32"),
@@ -153,6 +157,7 @@ def generate_samples(
     reader: readers.Reader,
 ):
     for sub, ses, run in runs:
+        # nb, .lh path is passed but read_gifti_surf_data loads both hemispheres
         path = f"{sub}/32k_fs_LR/timeseries/timeseries_session{ses:02d}_run{run:02d}.lh.func.gii"
         fullpath = root / "nsddata_timeseries/ppdata" / path
 
@@ -174,7 +179,7 @@ def generate_samples(
                 "run": run,
                 "trial_id": event["trial_id"],
                 "nsd_id": event["nsd_id"],
-                "coco_id": target,
+                "category_id": target,
                 "path": str(path),
                 "start": start,
                 "end": end,
