@@ -49,7 +49,9 @@ def main(args: DictConfig):
     ut.random_seed(args.seed)
 
     if not args.get("name"):
-        args.name = f"{args.name_prefix}/{args.model}/{args.representation}/{args.dataset}"
+        args.name = (
+            f"{args.name_prefix}/{args.model}/{args.representation}__logistic/{args.dataset}"
+        )
     args.output_dir = f"{args.output_root}/{args.name}"
     output_dir = Path(args.output_dir)
 
