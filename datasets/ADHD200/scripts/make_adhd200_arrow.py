@@ -106,6 +106,8 @@ def main(args):
                 num_proc=args.num_proc,
                 split=hfds.NamedSplit(split),
                 cache_dir=tmpdir,
+                # otherwise fingerprint crashes on mni space, ig bc of hashing the reader
+                fingerprint=f"hcpya-rest1lr-{args.space}-{split}",
             )
         dataset = hfds.DatasetDict(dataset_dict)
 
@@ -168,13 +170,15 @@ def prefetch(root: AnyPath, paths: list[str], *, max_workers: int = 1):
             if isinstance(fullpath, CloudPath):
                 tmppath = Path(tmpdir) / path
                 tmppath.parent.mkdir(parents=True, exist_ok=True)
-                fullpath = fullpath.download_to(tmppath)
 
                 # get sidecar too (hack)
                 stem = fullpath.name.split(".")[0]
                 sidecar = fullpath.parent / f"{stem}.json"
                 tmpsidecar = tmppath.parent / f"{stem}.json"
                 sidecar.download_to(tmpsidecar)
+
+                fullpath = fullpath.download_to(tmppath)
+
             return path, fullpath
 
         with ThreadPoolExecutor(max_workers) as executor:
