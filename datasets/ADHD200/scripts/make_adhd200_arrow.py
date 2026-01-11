@@ -3,15 +3,17 @@ import json
 import logging
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import datasets as hfds
 import numpy as np
 import pandas as pd
-from cloudpathlib import AnyPath
+from cloudpathlib import AnyPath, CloudPath, S3Path
 
 import fmri_fm_eval.nisc as nisc
 import fmri_fm_eval.readers as readers
+import fmri_fm_eval.utils as ut
 
 logging.basicConfig(
     format="[%(levelname)s %(asctime)s]: %(message)s",
@@ -19,6 +21,7 @@ logging.basicConfig(
     datefmt="%y-%m-%d %H:%M:%S",
 )
 logging.getLogger("nibabel").setLevel(logging.ERROR)
+logging.getLogger("botocore").setLevel(logging.ERROR)  # quiet aws credential log msg
 
 _logger = logging.getLogger(__name__)
 
@@ -33,7 +36,8 @@ MAX_NUM_TRS = 150
 
 
 def main(args):
-    outdir = ROOT / f"data/processed/adhd200.{args.space}.arrow"
+    out_root = AnyPath(args.out_root or (ROOT / "data/processed"))
+    outdir = out_root / f"adhd200.{args.space}.arrow"
     _logger.info("Generating dataset: %s", outdir)
     if outdir.exists():
         _logger.warning("Output %s exists; exiting.", outdir)
@@ -49,16 +53,14 @@ def main(args):
         suffix = "_space-fsLR_den-91k_bold.dtseries.nii"
 
     # preprocessed data paths
-    fmriprep_root = ROOT / "data/fmriprep"
-    curated_paths = [fmriprep_root / p.replace("_bold.nii.gz", suffix) for p in curated_paths]
-    assert all(p.exists() for p in curated_paths)
+    curated_paths = [p.replace("_bold.nii.gz", suffix) for p in curated_paths]
 
     # mapping of subs to assigned splits
     sub_split_map = {sub: split for sub, split in zip(curated_df["sub"], curated_df["split"])}
     # data paths for each split
     path_splits = {split: [] for split in SPLITS}
     for path in curated_paths:
-        sub = path.parts[-3].split("-")[1]
+        sub = path.split("/")[1].split("-")[1]
         split = sub_split_map[sub]
         path_splits[split].append(path)
 
@@ -66,6 +68,9 @@ def main(args):
     # all readers return a bold data array of shape (n_samples, dim).
     reader = readers.READER_DICT[args.space]()
     dim = readers.DATA_DIMS[args.space]
+
+    # root can be local or remote.
+    root = AnyPath(args.root or ROOT / "data/fmriprep")
 
     # the bold data are scaled to mean 0, stdev 1 and then truncated to float16 to save
     # space. but we keep the mean and std to reverse this since some models need this.
@@ -93,7 +98,7 @@ def main(args):
                 features=features,
                 gen_kwargs={
                     "paths": paths,
-                    "root": fmriprep_root,
+                    "root": root,
                     "curated_df": curated_df,
                     "reader": reader,
                     "dim": dim,
@@ -104,24 +109,31 @@ def main(args):
             )
         dataset = hfds.DatasetDict(dataset_dict)
 
-        outdir.parent.mkdir(exist_ok=True, parents=True)
-        dataset.save_to_disk(outdir, max_shard_size="300MB")
+        if isinstance(outdir, S3Path):
+            _logger.info("Saving to s3: %s", outdir)
+            tmp_outdir = Path(tmpdir) / outdir.name
+            # in theory save_to_disk should support s3, but idk why it wasn't working
+            dataset.save_to_disk(tmp_outdir, max_shard_size="300MB")
+            ut.rsync(tmp_outdir, outdir)
+        else:
+            _logger.info("Saving locally: %s", outdir)
+            dataset.save_to_disk(outdir, max_shard_size="300MB")
 
 
 def generate_samples(
     paths: list[Path], *, root: AnyPath, curated_df: pd.DataFrame, reader: readers.Reader, dim: int
 ):
-    for path in paths:
-        sidecar_path = path.parent / (path.name.split(".")[0] + ".json")
+    for path, fullpath in prefetch(root, paths):
+        sidecar_path = fullpath.parent / (fullpath.name.split(".")[0] + ".json")
         with sidecar_path.open() as f:
             sidecar_data = json.load(f)
         tr = float(sidecar_data["RepetitionTime"])
         meta = parse_adhd200_metadata(path)
 
         sub = meta["sub"]
-        row = curated_df.query(f"sub == '{sub}").iloc[0]
+        row = curated_df.query(f"sub == '{sub}'").iloc[0]
 
-        series = reader(path)
+        series = reader(fullpath)
         series = nisc.resample_timeseries(series, tr=tr, new_tr=TARGET_TR, kind="pchip")
 
         T, D = series.shape
@@ -136,7 +148,7 @@ def generate_samples(
             "site": meta["site"],
             "gender": row["gender"],
             "dx": row["dx"],
-            "path": str(path.relative_to(root)),
+            "path": str(path),
             "n_frames": MAX_NUM_TRS,
             "tr": TARGET_TR,
             "bold": series.astype(np.float16),
@@ -146,8 +158,39 @@ def generate_samples(
         yield sample
 
 
+def prefetch(root: AnyPath, paths: list[str], *, max_workers: int = 1):
+    """Prefetch files from remote storage."""
+
+    with tempfile.TemporaryDirectory(prefix="prefetch-") as tmpdir:
+
+        def fn(path: str):
+            fullpath = root / path
+            if isinstance(fullpath, CloudPath):
+                tmppath = Path(tmpdir) / path
+                tmppath.parent.mkdir(parents=True, exist_ok=True)
+                fullpath = fullpath.download_to(tmppath)
+
+                # get sidecar too (hack)
+                stem = fullpath.name.split(".")[0]
+                sidecar = fullpath.parent / f"{stem}.json"
+                tmpsidecar = tmppath.parent / f"{stem}.json"
+                sidecar.download_to(tmpsidecar)
+            return path, fullpath
+
+        with ThreadPoolExecutor(max_workers) as executor:
+            futures = [executor.submit(fn, p) for p in paths]
+
+            for future in futures:
+                path, fullpath = future.result()
+                yield path, fullpath
+
+                if str(fullpath).startswith(tmpdir):
+                    fullpath.unlink()
+
+
 def parse_adhd200_metadata(path: Path):
     # Brown/sub-0026001/ses-1/func/sub-0026001_ses-1_task-rest_run-1_bold.nii.gz
+    path = Path(path)
     dataset = path.parts[0]
     site = dataset.split("_")[0]  # Peking_1 -> Peking
     stem, ext = path.name.split(".", 1)
@@ -162,7 +205,11 @@ def parse_adhd200_metadata(path: Path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--space", type=str, default="fslr64k", choices=list(readers.READER_DICT))
+    parser.add_argument("--root", type=str, default=None)
+    parser.add_argument("--out-root", type=str, default=None)
+    parser.add_argument(
+        "--space", type=str, default="schaefer400", choices=list(readers.READER_DICT)
+    )
     parser.add_argument("--num_proc", "-j", type=int, default=32)
     args = parser.parse_args()
     sys.exit(main(args))
