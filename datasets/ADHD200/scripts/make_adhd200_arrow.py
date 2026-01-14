@@ -47,7 +47,7 @@ def main(args):
     curated_df = pd.read_csv(ROOT / "metadata/ADHD200_curated.csv", dtype={"sub": str})
     curated_paths = curated_df["path"].values
 
-    if args.space in {"a424", "mni", "mni_cortex", "schaefer400_tians3_buckner7"}:
+    if args.space in readers.VOLUME_SPACES:
         suffix = "_space-MNI152NLin6Asym_res-2_desc-preproc_bold.nii.gz"
     else:
         suffix = "_space-fsLR_den-91k_bold.dtseries.nii"

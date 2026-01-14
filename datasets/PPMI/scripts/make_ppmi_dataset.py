@@ -58,7 +58,7 @@ def main(args):
             curated_paths[sub] = path
     curated_paths = list(curated_paths.values())
 
-    if args.space in {"a424", "mni", "mni_cortex", "schaefer400_tians3_buckner7"}:
+    if args.space in readers.VOLUME_SPACES:
         suffix = "_space-MNI152NLin6Asym_res-2_desc-preproc_bold.nii.gz"
     else:
         suffix = "_space-fsLR_den-91k_bold.dtseries.nii"

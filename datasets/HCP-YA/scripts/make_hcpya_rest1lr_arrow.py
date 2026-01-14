@@ -113,10 +113,7 @@ def main(args):
         assert len(paths) == NUM_SUBS[split], "unexpected number of paths"
 
     # volume space for a424 and mni, otherwise cifti space
-    # TODO: hacky, the reader should know what input space it needs. we shouldn't need
-    # to remember this in every script.
-    # TODO: this sucks
-    if args.space in {"a424", "mni", "mni_cortex", "schaefer400_tians3_buckner7"}:
+    if args.space in readers.VOLUME_SPACES:
         for split, split_paths in path_splits.items():
             path_splits[split] = [
                 p.replace("_Atlas_MSMAll.dtseries.nii", ".nii.gz") for p in split_paths
