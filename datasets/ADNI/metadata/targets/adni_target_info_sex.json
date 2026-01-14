@@ -1,0 +1,14 @@
+{
+    "target": "sex",
+    "column": "PTGENDER",
+    "na_count": 0,
+    "subjects_total": 641,
+    "classes": [
+        "Female",
+        "Male"
+    ],
+    "label_counts": [
+        318,
+        323
+    ]
+}

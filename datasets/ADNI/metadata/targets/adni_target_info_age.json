@@ -1,0 +1,39 @@
+{
+    "target": "age",
+    "column": "AGE",
+    "na_count": 0,
+    "subjects_total": 641,
+    "bins": [
+        69.533,
+        75.1
+    ],
+    "label_counts": [
+        214,
+        215,
+        212
+    ],
+    "num_bins": 3,
+    "bin_stats": [
+        {
+            "bin": 0,
+            "count": 214,
+            "fraction": 0.3339,
+            "min": 55.0,
+            "max": 69.5
+        },
+        {
+            "bin": 1,
+            "count": 215,
+            "fraction": 0.3354,
+            "min": 69.6,
+            "max": 75.1
+        },
+        {
+            "bin": 2,
+            "count": 212,
+            "fraction": 0.3307,
+            "min": 75.2,
+            "max": 89.2
+        }
+    ]
+}
