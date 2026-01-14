@@ -20,6 +20,7 @@ ROOT="s3://medarc/fmri-fm-eval/ABIDE/fmriprep"
 OUT_ROOT="s3://medarc/fmri-datasets/eval"
 
 log_path="logs/make_abide_arrow.log"
+[[ -d logs ]] || mkdir logs
 
 for ii in $SPACEIDS; do
     space=${spaces[ii]}

@@ -40,8 +40,8 @@ def main(args):
     outdir = out_root / f"abide.{args.space}.arrow"
     _logger.info("Generating dataset: %s", outdir)
     if outdir.exists():
-        _logger.warning("Output %s exists; exiting.", outdir)
-        return 1
+        _logger.info("Output %s exists; exiting.", outdir)
+        return
 
     # load table of curated subs and targets
     curated_df = pd.read_csv(ROOT / "metadata/ABIDE_curated.csv", dtype={"sub": str})
