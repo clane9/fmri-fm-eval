@@ -226,7 +226,7 @@ def get_s3_client():
     config = TransferConfig(
         multipart_threshold=8 * 1024 * 1024,
         multipart_chunksize=8 * 1024 * 1024,
-        max_concurrency=16,
+        max_concurrency=10,
         use_threads=True,
     )
 
