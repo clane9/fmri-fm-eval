@@ -42,8 +42,8 @@ def main(args):
     outdir = out_root / f"ppmi.{args.space}.arrow"
     _logger.info("Generating dataset: %s", outdir)
     if outdir.exists():
-        _logger.warning("Output %s exists; exiting.", outdir)
-        return 1
+        _logger.info("Output %s exists; exiting.", outdir)
+        return
 
     # load curated subjects
     curated_df = pd.read_csv(ROOT / "metadata/PPMI_curated.csv", dtype={"Subject": str})
