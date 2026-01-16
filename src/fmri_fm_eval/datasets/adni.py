@@ -1,18 +1,13 @@
 import json
 import os
-from pathlib import Path
 
 import datasets as hfds
+import fsspec
 
-from fmri_fm_eval.datasets.base import HFDataset
+from fmri_fm_eval.datasets.base import HFDataset, load_arrow_dataset
 from fmri_fm_eval.datasets.registry import register_dataset
 
-ADNI_ROOT = os.getenv("ADNI_ROOT")
-assert ADNI_ROOT is not None, (
-    "ADNI_ROOT environment variable is not set. "
-    "Please set it to the directory containing ADNI processed data. "
-)
-ADNI_ROOT = Path(ADNI_ROOT)
+ADNI_ROOT = os.getenv("ADNI_ROOT", "s3://medarc/fmri-datasets/eval")
 
 ADNI_TARGET_MAP_DICT = {
     # Demographics
@@ -41,15 +36,16 @@ def _create_adni(space: str, target: str, **kwargs):
     """
     # Load target map
     target_map_path = ADNI_TARGET_MAP_DICT[target]
-    target_map_path = ADNI_ROOT / "targets" / target_map_path
-    with open(target_map_path) as f:
+    target_map_path = f"{ADNI_ROOT}/targets/{target_map_path}"
+
+    with fsspec.open(target_map_path, "r") as f:
         target_map = json.load(f)
 
     dataset_dict = {}
     splits = ["train", "validation", "test"]
     for split in splits:
         url = f"{ADNI_ROOT}/adni.{space}.arrow/{split}"
-        dataset = hfds.load_dataset("arrow", data_files=f"{url}/*.arrow", split="train", **kwargs)
+        dataset = load_arrow_dataset(url, **kwargs)
 
         # For ADNI, we need custom target key mapping since targets are keyed by PTID_SCANDATE
         # We'll use a custom wrapper that builds the key from sub and visit
@@ -72,9 +68,9 @@ def build_sample_key(sub: str, visit: str) -> str:
     # Reconstruct PTID from sub
     # sub format: "168S6049" -> PTID format: "168_S_6049"
     # Find the 'S' position and insert underscores
-    s_pos = sub.find('S')
+    s_pos = sub.find("S")
     if s_pos > 0:
-        ptid = f"{sub[:s_pos]}_S_{sub[s_pos+1:]}"
+        ptid = f"{sub[:s_pos]}_S_{sub[s_pos + 1 :]}"
     else:
         ptid = sub  # Fallback
 
@@ -85,6 +81,9 @@ def build_sample_key(sub: str, visit: str) -> str:
         scandate = visit  # Fallback
 
     return f"{ptid}_{scandate}"
+
+
+# TODO: fix this duplication
 
 
 class ADNIDataset(HFDataset):

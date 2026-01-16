@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import Any, Callable
 
@@ -5,6 +6,15 @@ import datasets as hfds
 import numpy as np
 import pandas as pd
 import torch
+from cloudpathlib import AnyPath
+from filelock import FileLock
+from datasets.config import HF_DATASETS_CACHE
+
+hfds.disable_progress_bars()
+
+# parallelize download
+HF_NUM_PROC = min(int(os.getenv("OMP_NUM_THREADS", "8")), 8)
+HF_DOWNLOAD_CONFIG = hfds.DownloadConfig(num_proc=HF_NUM_PROC)
 
 
 class HFDataset(torch.utils.data.Dataset):
@@ -86,3 +96,28 @@ class HFDataset(torch.utils.data.Dataset):
         )
         s = f"HFDataset(\n{s}\n)"
         return s
+
+
+def load_arrow_dataset(path: str | Path, cache_dir: str | Path | None = None, **kwargs):
+    # try to give a more informative error message if a dataset doesn't exist
+    # hf error message is pretty useless
+    path = AnyPath(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Dataset {path} does not exist")
+
+    cache_dir = Path(cache_dir or HF_DATASETS_CACHE)
+    cache_dir.mkdir(exist_ok=True, parents=True)
+
+    # try handle race condition when multiple jobs attempt to download the same dataset
+    # TODO: think more about this
+    dataset_name = str(path.relative_to(path.parents[1])).replace("/", "__")
+    with FileLock(f"{cache_dir}/.{dataset_name}.lock"):
+        dataset = hfds.load_dataset(
+            "arrow",
+            data_files=f"{path}/*.arrow",
+            split="train",
+            download_config=HF_DOWNLOAD_CONFIG,
+            cache_dir=cache_dir,
+            **kwargs,
+        )
+    return dataset

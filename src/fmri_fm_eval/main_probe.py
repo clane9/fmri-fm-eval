@@ -7,8 +7,10 @@
 import argparse
 import datetime
 import json
+import importlib.metadata
 import math
 import time
+import traceback
 from collections import defaultdict
 from functools import partial
 from itertools import product
@@ -27,7 +29,6 @@ from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
 import fmri_fm_eval.utils as ut
-import fmri_fm_eval.version
 from fmri_fm_eval.classifiers import ClassifierGrid, create_classifier, list_classififiers
 from fmri_fm_eval.datasets.base import HFDataset
 from fmri_fm_eval.models.registry import create_model, list_models
@@ -46,7 +47,7 @@ def main(args: DictConfig):
     if not args.get("name"):
         args.name = (
             f"{args.name_prefix}/"
-            f"{args.model}/{args.representation}__{args.classifier}/{args.dataset}"
+            f"{args.dataset}__{args.model}__{args.representation}__{args.classifier}"
         )
     args.output_dir = f"{args.output_root}/{args.name}"
     output_dir = Path(args.output_dir)
@@ -79,7 +80,7 @@ def main(args: DictConfig):
     ut.setup_for_distributed(log_path=output_dir / "log.txt")
 
     print("fMRI foundation model probe eval")
-    print(f"version: {fmri_fm_eval.version.__version__}")
+    print(f"version: {importlib.metadata.version('fmri-fm-eval')}")
     print(ut.get_sha())
     print(f"cwd: {Path.cwd()}")
     print(f"start: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -94,9 +95,14 @@ def main(args: DictConfig):
 
     # dataset
     print(f"creating dataset: {args.dataset} ({backbone.__space__})")
-    dataset_dict = create_dataset(
-        args.dataset, space=backbone.__space__, **(args.dataset_kwargs or {})
-    )
+    try:
+        dataset_dict = create_dataset(
+            args.dataset, space=backbone.__space__, **(args.dataset_kwargs or {})
+        )
+    except Exception as exc:
+        msg = traceback.format_exception_only(exc)[0]
+        print(f"error loading dataset: {args.dataset} ({backbone.__space__}); exiting\n\n{msg}")
+
     for split, ds in dataset_dict.items():
         print(f"{split} (n={len(ds)}):\n{ds}\n")
     train_dataset: HFDataset = dataset_dict["train"]
@@ -431,6 +437,7 @@ def train_one_epoch(
     device: torch.device,
 ):
     model.train()
+    model.backbone.eval()
     use_cuda = device.type == "cuda"
     log_wandb = args.wandb and ut.is_main_process()
     print_freq = args.get("print_freq", 20) if not args.debug else 1
